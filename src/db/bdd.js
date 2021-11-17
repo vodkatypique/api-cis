@@ -9,22 +9,24 @@ const collectionName = 'bdd';
 const collectionIPs = 'ips';
 
 
-async function sendHash(username, hash) {
+async function sendHash(username, hash, format) {
+  console.log(hash, username, format);
     const database = await getDatabase();
     const best = await database.collection(collectionIPs).find({}).sort({current_use: 1}).toArray();
-    const ip = best[0].ip;
-    const {insertedId} = await database.collection(collectionName).insertOne({"hash" : hash, "username": username, "sendAt":  dateTime.create().format('Y-m-d H:M:S'), "sendTo": ip});
-    console.log({ message: 'hash a envoyer vers autre poste ip '+ip });
+    const ip = best[0].ip.split(" ").join("");
+    hash.split("\n").forEach(async h => {
+      var {insertedId} = await database.collection(collectionName).insertOne({"hash" : h, "username": username, "sendAt":  dateTime.create().format('Y-m-d H:M:S'), "sendTo": ip});
+    });
 
     var client = new net.Socket();
-    client.connect(1605, '172.17.10.191', function() {//ip du netcat. while true; do nc -l -p 1605; done dans ubuntu marche
-      console.log('sending to server: a.random.test');
-      client.write("hash:"+ hash+ "\n");
+    client.connect(1605, ip, await function() {//ip du netcat. while true; do nc -l -p 1605; done dans ubuntu marche
+      console.log('sending to server: '+ ip);
+      client.write(hash + " " + format);
       client.end();
   });
 
     await incrementUseIp(ip);
-    return insertedId;
+    return null;
   }
 
 async function getBdd() {
@@ -69,9 +71,14 @@ async function getIPs() {
   return database.collection(collectionIPs).find({}).toArray();
 }
 
-async function receiveHash(ip_source, hash, hashClair) {
+async function receiveHash(ip_source, hash) {
   const database = await getDatabase();
-  const {updatedId} = await database.collection(collectionName).updateOne({"hash" : hash}, {$set: {hashClear: hashClair, "receiveAt":  dateTime.create().now()}});
+  
+  for (const key in hash) {
+    if (Object.hasOwnProperty.call(hash, key)) {
+      var {updatedId} = await database.collection(collectionName).updateOne({"hash" : key}, {$set: {hashClear: hash[key], "receiveAt":  dateTime.create().now()}});
+    }
+  }
   decrementUseIp(ip_source);
   return updatedId;
 }

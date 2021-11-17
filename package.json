@@ -29,7 +29,9 @@
     "passport-local": "^1.0.0",
     "passport-totp": "0.0.2",
     "qrcode": "^1.4.4",
+    "remote-exec": "0.0.3",
     "simple-ldap-search": "^3.0.2",
+    "simple-ssh": "^1.0.0",
     "speakeasy": "^2.0.0"
   }
 }

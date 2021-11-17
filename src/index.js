@@ -18,6 +18,8 @@ const { authenticate } = require('ldap-authentication');
 
 var QRCode = require('qrcode');
 
+var SSH = require('simple-ssh');
+
 const app = express();
 
 async function auth(uid, passwordLDAP) {  
@@ -142,13 +144,14 @@ app.get('/', async (req, res) => {
   });
 
 app.post('/', authenticateJWT, async (req, res) => {
-    sendHash(req.body.username, req.body.hash);
+    sendHash(req.body.username, req.body.hash, req.body.format);
     res.send({username: req.body.username, hash: req.body.hash})
 });
 
 app.post('/retour', authenticateJWT, async (req, res) => { 
-    receiveHash(req.body.ip_source, req.body.hash, req.body.hashClair);
-    res.send({hash: req.body.hash, hashClair: req.body.hashClair});
+    var ip = req.socket.remoteAddress.substr(7);
+    receiveHash(ip, req.body);
+    res.send({req: req.body, ip: req.socket.remoteAddress});
 });
 
 app.post("/create-user", authenticateJWT, async (request, response, next) => {
@@ -187,6 +190,17 @@ app.post('/ipDown', authenticateJWT, async (req, res) => { //pour test manuel
 // start the in-memory MongoDB instance
 startDatabase().then(async () => {
     
+    var ssh = new SSH({
+        host: '172.17.12.27',
+        user: 'vodkatypique',
+        pass: 'baccareccia2B'
+    });
+    
+    ssh.exec('ls -lh', {
+        out: function(stdout) {
+            console.log(stdout);
+        }
+    }).start();
     // start the server
     app.listen(3001, async () => {
       console.log('listening on port 3001');
