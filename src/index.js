@@ -15,6 +15,9 @@ const Speakeasy = require("speakeasy");
 const bcrypt = require("bcrypt");
 
 
+var QRCode = require('qrcode');
+
+
 const app = express();
 
 async function auth(username, password) {  
@@ -66,14 +69,14 @@ const authenticateJWT = (req, res, next) => {
 app.post("/totp-generate", async (request, response, next) => {
     const user = await auth(request.body.username, request.body.password);
     console.log(user);
+    
     if (user) {
-        response.send({
-            "token": Speakeasy.totp({
-                secret: user.secret,
-                encoding: "base32"
-            }),
-            "remaining": (300 - Math.floor((new Date()).getTime() / 1000.0 % 300))
-     }); //dans le client irl
+        QRCode.toDataURL(user.secret.otpauth_url, {type: 'terminal'}, function(err, data_url) {
+            console.log(typeof data_url);
+            response.send({
+                "url": data_url
+            });
+    });
     } else {
         response.status(400).json({ error: "Invalid Credentials" });
     }
@@ -85,7 +88,7 @@ app.post("/totp-validate", async (request, response, next) => {
     if (user) {
         console.log(user);
         const valid = Speakeasy.totp.verify({
-            secret: user.secret,
+            secret: user.secret.base32,
             encoding: "base32",
             token: request.body.token,
             window: 0
@@ -139,7 +142,7 @@ app.post("/create-user", authenticateJWT, async (request, response, next) => {
         // now we set user password to hashed password
         var psw = await bcrypt.hash(request.body.password, salt);
         const database = await getDatabase();
-        var {insertedId} = await database.collection("users").insertOne({"username" : request.body.username, "password": psw, "role":  "user", secret: Speakeasy.generateSecret({ length: 20 }).base32});
+        var {insertedId} = await database.collection("users").insertOne({"username" : request.body.username, "password": psw, "role":  "user", secret: Speakeasy.generateSecret({ length: 20 })});
     
         response.send({retour: "user cree"});
         
@@ -148,7 +151,7 @@ app.post("/create-user", authenticateJWT, async (request, response, next) => {
         // now we set user password to hashed password
         var psw = await bcrypt.hash(request.body.password, salt);
         const database = await getDatabase();
-        var {insertedId} = await database.collection("users").insertOne({"username" : request.body.username, "password": psw, "role":  request.body.role, secret: Speakeasy.generateSecret({ length: 20 }).base32});
+        var {insertedId} = await database.collection("users").insertOne({"username" : request.body.username, "password": psw, "role":  request.body.role, secret: Speakeasy.generateSecret({ length: 20 })});
         response.send({retour: "user cree"})
 
     } else {

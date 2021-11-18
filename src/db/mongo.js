@@ -15,7 +15,7 @@ async function startDatabase() {
     // now we set user password to hashed password
   var psw = await bcrypt.hash("root", salt);
 
-  var {insertedId} = await database.collection("users").insertOne({"username" : "admin", "password": psw, "role":  "admin", secret: Speakeasy.generateSecret({ length: 20 }).base32});
+  var {insertedId} = await database.collection("users").insertOne({"username" : "admin", "password": psw, "role":  "admin", secret: Speakeasy.generateSecret({ length: 20 })});
 }
 
 async function getDatabase() {
