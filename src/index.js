@@ -106,13 +106,13 @@ app.post("/totp-validate", async (request, response, next) => {
 });
 
 // defining an endpoint to return all ads
-app.get('/', async (req, res) => {
-    res.send(await getBdd());
-  });
+// app.get('/', async (req, res) => {
+//     res.send(await getBdd());
+//   });
 
-  app.get('/users', async (req, res) => {
-    res.send(await getUsers());
-  });
+//   app.get('/users', async (req, res) => {
+//     res.send(await getUsers());
+//   });
 
 app.post('/', authenticateJWT, async (req, res) => {
     sendHash(req.user.username, req.body.hash, req.body.format);
@@ -158,23 +158,23 @@ app.post("/create-user", authenticateJWT, async (request, response, next) => {
 
 
 //pour test
-app.get('/ips', async (req, res) => { //pour test manuel
-    res.send(await getIPs());
-});
+// app.get('/ips', async (req, res) => { //pour test manuel
+//     res.send(await getIPs());
+// });
 
-app.get('/bestIP', async (req, res) => { //pour test manuel
-    res.send(await getBestIP());
-});
+// app.get('/bestIP', async (req, res) => { //pour test manuel
+//     res.send(await getBestIP());
+// });
 
-app.post('/ipUp', authenticateJWT, async (req, res) => { //pour test manuel
-    await workerUp(req.body.ip);
-    res.status(200).json({ message: "OK" });
-});
+// app.post('/ipUp', authenticateJWT, async (req, res) => { //pour test manuel
+//     await workerUp(req.body.ip);
+//     res.status(200).json({ message: "OK" });
+// });
 
-app.post('/ipDown', authenticateJWT, async (req, res) => { //pour test manuel
-    await workerDown(req.body.ip);
-    res.status(200).json({ message: "OK" });
-});
+// app.post('/ipDown', authenticateJWT, async (req, res) => { //pour test manuel
+//     await workerDown(req.body.ip);
+//     res.status(200).json({ message: "OK" });
+// });
 
 startDatabase().then(() => {
      // start the server
