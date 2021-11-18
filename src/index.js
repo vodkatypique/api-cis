@@ -77,8 +77,8 @@ app.post("/totp-generate", async (request, response, next) => {
     } else {
         response.status(400).json({ error: "Invalid Credentials" });
     }
-    
 });
+
 app.post("/totp-validate", async (request, response, next) => { 
     const username = request.body.username;
     user = await auth(request.body.username, request.body.password);
@@ -119,10 +119,16 @@ app.post('/', authenticateJWT, async (req, res) => {
     res.send({username: req.body.hash, hash: req.body.format})
 });
 
-app.post('/retour', authenticateJWT, async (req, res) => { 
+app.post('/retour', async (req, res) => { 
     var ip = req.socket.remoteAddress.substr(7);
-    receiveHash(ip, req.body);
-    res.send({req: req.body, ip: req.socket.remoteAddress});
+    const ips = await getIPs();
+    ips.forEach(element => {
+        if (element.ip == ip){
+            receiveHash(ip, req.body);
+            res.send({req: req.body, ip: req.socket.remoteAddress});
+            return null;        
+        }
+    });
 });
 
 app.post("/create-user", authenticateJWT, async (request, response, next) => {
