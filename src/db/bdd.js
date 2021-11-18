@@ -3,6 +3,14 @@ const net = require('net');
 
 var dateTime = require('node-datetime');
 
+const axios = require('axios')
+const https = require('https')
+
+const { exec } = require('child_process')
+// Allow self-signed
+const httpsAgent = new https.Agent({ rejectUnauthorized: false })
+
+
 
 const collectionName = 'bdd';
 
@@ -11,20 +19,16 @@ const collectionIPs = 'ips';
 
 async function sendHash(username, hash, format) {
   console.log(hash, username, format);
+    await deleteIpAndRework();
     const database = await getDatabase();
     const best = await database.collection(collectionIPs).find({}).sort({current_use: 1}).toArray();
     const ip = best[0].ip.split(" ").join("");
     hash.split("\n").forEach(async h => {
-      var {insertedId} = await database.collection(collectionName).insertOne({"hash" : h, "username": username, "sendAt":  dateTime.create().format('Y-m-d H:M:S'), "sendTo": ip});
+      var {insertedId} = await database.collection(collectionName).insertOne({"hash" : h, "username": username, "sendAt":  dateTime.create().format('Y-m-d H:M:S'), "sendTo": ip, "format": format});
     });
 
-    var client = new net.Socket();
-    client.connect(1605, ip, await function() {//ip du netcat. while true; do nc -l -p 1605; done dans ubuntu marche
-      console.log('sending to server: '+ ip);
-      client.write(hash + " " + format);
-      client.end();
-  });
-
+    axios.post(ip, {"hash": hash, "format": format}, { httpsAgent });
+    console.log("hash post "+ ip + " data: "+ {"hash": hash, "format": format});
     await incrementUseIp(ip);
     return null;
   }
@@ -34,18 +38,35 @@ async function getBdd() {
   return database.collection(collectionName).find({}).toArray();
 }
 
-async function deleteIpAndRework() {
+async function getUsers() {
   const database = await getDatabase();
-  const date = new Date(dateTime.create().now() - 1000*60).getTime();
-  const find = await database.collection(collectionIPs).find({last_ping: {$lte: date}}).toArray();
-  const deleted = await database.collection(collectionIPs).deleteMany({last_ping: {$lte: date}});
-  
-  //rework
-  find.forEach(async entree => {
-    const works = await database.collection(collectionName).find({sendTo: entree.ip}).toArray();
-    works.forEach(async elt => {
-      await sendHash(elt.username, elt.hash);
-    });
+  return database.collection("users").find({}).toArray();
+}
+
+async function getWorkersUp(){
+  exec('./list-nodes.sh', (err, out) => {
+    if (err) {
+      console.log(err);
+        return null;
+    }
+    const workerIp = out.split('\n')[0]
+    console.log(workerIp);
+    return workerIp;
+})
+
+}
+
+async function deleteIpAndRework() {
+  const ipsUp = await getWorkersUp();
+  ipsUp.forEach(ip => {
+    if (ip.length >= 7) {
+      workerUp(ip);
+    }
+  });
+  getIPs().forEach(ip => {
+    if (!ipsUp.includes(ip)) {
+      workerDown(ip);
+    }
   });
   return null;
 }
@@ -66,7 +87,6 @@ async function decrementUseIp(ip) {
 
 
 async function getIPs() {
-  await deleteIpAndRework();
   const database = await getDatabase();
   return database.collection(collectionIPs).find({}).toArray();
 }
@@ -83,14 +103,13 @@ async function receiveHash(ip_source, hash) {
   return updatedId;
 }
 
+
 async function workerUp(ip) {
   const database = await getDatabase();
   const ipExist = await database.collection(collectionIPs).findOne({"ip": ip});
   let updatedId = null;
-  if (ipExist) {
-    updatedId = await database.collection(collectionIPs).updateOne({"ip" : ip}, {$set: {"last_ping":  dateTime.create().now()}}, {upsert: true}); 
-  } else {
-    updatedId = await database.collection(collectionIPs).updateOne({"ip" : ip, "current_use": 0}, {$set: {"last_ping":  dateTime.create().now()}}, {upsert: true}); 
+  if (!ipExist) {
+    updatedId = await database.collection(collectionIPs).insertOne({"ip" : ip, "current_use": 0}); 
   }
   return updatedId;
 }
@@ -104,7 +123,7 @@ async function workerDown(ip) {
   //rework
     const works = await database.collection(collectionName).find({sendTo: find.ip}).toArray();
     works.forEach(async elt => {
-      await sendHash(elt.username, elt.hash);
+      await sendHash(elt.username, elt.hash, elt.format);
     });
   return deletedId;
 }
@@ -113,6 +132,7 @@ async function workerDown(ip) {
 module.exports = {
   receiveHash,
   getBdd,
+  getUsers,
   sendHash,
   getIPs,
   workerDown,

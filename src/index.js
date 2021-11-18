@@ -5,8 +5,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 
-const {startDatabase} = require('./db/mongo');
-const {incrementUseIp, decrementUseIp, receiveHash, getBdd, sendHash, getIPs, workerDown, workerUp, getBestIP} = require('./db/bdd');
+const {startDatabase, getDatabase} = require('./db/mongo');
+const {incrementUseIp, decrementUseIp, receiveHash, getBdd, getUsers, sendHash, getIPs, workerDown, workerUp, getBestIP} = require('./db/bdd');
 
 const jwt = require('jsonwebtoken');
 
@@ -14,30 +14,19 @@ const Speakeasy = require("speakeasy");
 
 const bcrypt = require("bcrypt");
 
-const { authenticate } = require('ldap-authentication');
-
-var QRCode = require('qrcode');
-
-var SSH = require('simple-ssh');
 
 const app = express();
 
-async function auth(uid, passwordLDAP) {  
-    options = {
-      ldapOpts: {
-        url: 'ldap://ldap.forumsys.com',
-        // tlsOptions: { rejectUnauthorized: false }
-      },
-      userDn: 'uid='+uid+',dc=example,dc=com',
-      userPassword: passwordLDAP,
-      userSearchBase: 'dc=example,dc=com',
-        usernameAttribute: 'uid',
-        username: uid,
-      // starttls: false
+async function auth(username, password) {  
+    const database = await getDatabase();
+    const user = await database.collection("users").findOne({"username": username});
+    if (user) {
+        const validPassword = await bcrypt.compare(password, user.password);
+        if (validPassword) {
+            return user;
+        }
     }
-  
-    user = await authenticate(options);
-    return user;
+    return null;
   }
   
 // adding Helmet to enhance your API's security
@@ -57,15 +46,12 @@ const accessTokenSecret = 'youraccesstokensecret';
 
 const authenticateJWT = (req, res, next) => {
     const authHeader = req.headers.authorization;
-
     if (authHeader) {
         const token = authHeader.split(' ')[1];
-
         jwt.verify(token, accessTokenSecret, (err, user) => {
             if (err) {
                 return res.sendStatus(403);
             }
-
             req.user = user;
             next();
         });
@@ -74,31 +60,13 @@ const authenticateJWT = (req, res, next) => {
     }
 };
 
-//logique : (secret pour generer un secret relatif a l'user, puis) generate pour avoir un token si user/password est ok, puis validate pour verifier le token et avoir un jwt
+//logique : generate pour avoir un token si user/password est ok, puis validate pour verifier le token et avoir un jwt
 
-app.post("/totp-secret", async (request, response, next) => { //sera dans ldap par default, cette fonction est donc inutile
-    var secret = Speakeasy.generateSecret({ length: 20 }).base32;
-    const user = await auth(request.body.username, request.body.password);
-    console.log(user)
-    if (user) {
-        //addSecret(request.body.username, secret)
-        response.status(200).json({ message: "Valid password" });
-    } else {
-        response.status(400).json({ error: "Invalid Password" });
-    }
-    //response.send({ "secret": secret.base32 }); 
-});
 
 app.post("/totp-generate", async (request, response, next) => {
     const user = await auth(request.body.username, request.body.password);
     console.log(user);
     if (user) {
-        user.secret = 'KFDVGVSSHZ5GIZDOIM7DOUCSOMYDYQTQ' //pck pas add en ldap
- 
-// QRCode.toString('I am a pony!',{type:'terminal'}, function (err, url) {
-//   console.log(url)
-// })
-
         response.send({
             "token": Speakeasy.totp({
                 secret: user.secret,
@@ -107,16 +75,15 @@ app.post("/totp-generate", async (request, response, next) => {
             "remaining": (300 - Math.floor((new Date()).getTime() / 1000.0 % 300))
      }); //dans le client irl
     } else {
-        response.status(400).json({ error: "Invalid Password" });
+        response.status(400).json({ error: "Invalid Credentials" });
     }
     
 });
 app.post("/totp-validate", async (request, response, next) => { 
     const username = request.body.username;
-    user = auth(request.body.username, request.body.password);
+    user = await auth(request.body.username, request.body.password);
     if (user) {
-        console.log(1);
-        user.secret = 'KFDVGVSSHZ5GIZDOIM7DOUCSOMYDYQTQ'//pck pas add en ldap
+        console.log(user);
         const valid = Speakeasy.totp.verify({
             secret: user.secret,
             encoding: "base32",
@@ -127,7 +94,7 @@ app.post("/totp-validate", async (request, response, next) => {
         if (valid) {
             console.log(2);
             // Generate an access token
-        const accessToken = jwt.sign({ username: username,  role: "user" }, accessTokenSecret); //role sera dans le ldap
+        const accessToken = jwt.sign({ username: username,  role: user.role }, accessTokenSecret,  { expiresIn: '5h' }); 
             console.log(3);
         response.json({
             accessToken 
@@ -143,9 +110,13 @@ app.get('/', async (req, res) => {
     res.send(await getBdd());
   });
 
+  app.get('/users', async (req, res) => {
+    res.send(await getUsers());
+  });
+
 app.post('/', authenticateJWT, async (req, res) => {
-    sendHash(req.body.username, req.body.hash, req.body.format);
-    res.send({username: req.body.username, hash: req.body.hash})
+    sendHash(req.user.username, req.body.hash, req.body.format);
+    res.send({username: req.body.hash, hash: req.body.format})
 });
 
 app.post('/retour', authenticateJWT, async (req, res) => { 
@@ -156,15 +127,27 @@ app.post('/retour', authenticateJWT, async (req, res) => {
 
 app.post("/create-user", authenticateJWT, async (request, response, next) => {
     const { role } = request.user;
-    console.log(role);
-    if (role !== "creator") {
+
+    if (role == "creator" && request.body.role == "user") {
+        const salt = await bcrypt.genSalt(10);
+        // now we set user password to hashed password
+        var psw = await bcrypt.hash(request.body.password, salt);
+        const database = await getDatabase();
+        var {insertedId} = await database.collection("users").insertOne({"username" : request.body.username, "password": psw, "role":  "user", secret: Speakeasy.generateSecret({ length: 20 }).base32});
+    
+        response.send({retour: "user cree"});
         
-        response.status(400).json({ error: "Invalid role" });
-        
+    } else if (role == "admin" && (request.body.role == "user" || request.body.role == "creator")) {
+        const salt = await bcrypt.genSalt(10);
+        // now we set user password to hashed password
+        var psw = await bcrypt.hash(request.body.password, salt);
+        const database = await getDatabase();
+        var {insertedId} = await database.collection("users").insertOne({"username" : request.body.username, "password": psw, "role":  request.body.role, secret: Speakeasy.generateSecret({ length: 20 }).base32});
+        response.send({retour: "user cree"})
+
     } else {
-        //creer le role dans le ldap
-        response.status(200).json({ message: "Valid role" });
-    } 
+        response.send({retour: "bad credential"})
+    }
 });
 
 
@@ -187,22 +170,9 @@ app.post('/ipDown', authenticateJWT, async (req, res) => { //pour test manuel
     res.status(200).json({ message: "OK" });
 });
 
-// start the in-memory MongoDB instance
-startDatabase().then(async () => {
-    
-    var ssh = new SSH({
-        host: '172.17.12.27',
-        user: 'vodkatypique',
-        pass: 'baccareccia2B'
-    });
-    
-    ssh.exec('ls -lh', {
-        out: function(stdout) {
-            console.log(stdout);
-        }
-    }).start();
-    // start the server
-    app.listen(3001, async () => {
-      console.log('listening on port 3001');
-    });
-  });
+startDatabase().then(() => {
+     // start the server
+     app.listen(3001, async () => {
+        console.log('listening on port 3001');
+      });
+});
